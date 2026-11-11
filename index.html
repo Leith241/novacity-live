@@ -43,6 +43,7 @@ const CFG = {
   test: P.get("test") === "1",
   vol: parseFloat(P.get("vol") || "1"),        // Lautstärke Theo 0–1
   idleMin: parseFloat(P.get("idle") || "3.5"),  // Minuten zwischen Aufrufen ohne Events
+  music: parseFloat(P.get("music") ?? "0.35"),   // Lofi-Lautstärke 0–1 (0 = aus)
 };
 const LEVELS = [ // Baupunkte (BP) = Münzen der Geschenke
   { bp: 0,    name: "Starterhaus" },
@@ -285,6 +286,95 @@ setInterval(() => {   // Aufrufe, wenn gerade nichts passiert
 }, 5000);
 lastVoice = performance.now() - CFG.idleMin * 60000 + 20000;   // erster Aufruf nach ca. 20 s
 
+// ---------- Lofi-Musik (selbst erzeugt, kein Copyright) ----------
+const LOFI = (() => {
+  let ctx, master, lp, started = false, nextT = 0, step = 0, prog = 0, timer;
+  const BPM = 74, SPB = 60 / BPM, S16 = SPB / 4;
+  const m2f = m => 440 * Math.pow(2, (m - 69) / 12);
+  const PROGS = [
+    [[50, 53, 57, 60, 64], [43, 53, 57, 59, 64], [48, 52, 55, 59, 62], [45, 52, 55, 60, 64]],   // Dm9 G13 Cmaj9 Am9
+    [[53, 57, 60, 64, 67], [52, 55, 59, 62, 66], [50, 53, 57, 60, 64], [48, 52, 55, 59, 62]],   // Fmaj9 Em9 Dm9 Cmaj9
+    [[45, 52, 55, 60, 64], [50, 53, 57, 60, 64], [43, 53, 57, 59, 62], [48, 52, 55, 59, 64]],   // Am9 Dm9 G9 Cmaj9
+  ];
+  const PENTA = [72, 74, 76, 79, 81, 84];
+  let noiseBuf;
+  function init() {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = CFG.music;
+    lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3200; lp.Q.value = 0.3;
+    lp.connect(master); master.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    // Vinyl-Knistern
+    const vb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate), vd = vb.getChannelData(0);
+    for (let i = 0; i < vd.length; i++) vd[i] = (Math.random() * 2 - 1) * 0.012 + (Math.random() < 0.0004 ? (Math.random() - 0.5) * 0.5 : 0);
+    const vs = ctx.createBufferSource(); vs.buffer = vb; vs.loop = true;
+    const vf = ctx.createBiquadFilter(); vf.type = "bandpass"; vf.frequency.value = 2500; vf.Q.value = 0.6;
+    const vg = ctx.createGain(); vg.gain.value = 0.5; vs.connect(vf); vf.connect(vg); vg.connect(lp); vs.start();
+  }
+  function keys(t, notes, vel, dur) {
+    notes.forEach((n, k) => {
+      const f = m2f(n);
+      [[ "sine", 1, 0.55 ], [ "triangle", 2.001, 0.08 ]].forEach(([type, mul, amp]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = type; o.frequency.value = f * mul; o.detune.value = (Math.random() - 0.5) * 8;
+        g.gain.setValueAtTime(0, t + k * 0.012);
+        g.gain.linearRampToValueAtTime(vel * amp, t + k * 0.012 + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+        o.connect(g); g.connect(lp); o.start(t); o.stop(t + dur + 0.05);
+      });
+    });
+  }
+  function bass(t, n, dur) {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "sine"; o.frequency.value = m2f(n - 12);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.32, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(lp); o.start(t); o.stop(t + dur + 0.05);
+  }
+  function kick(t) {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o.connect(g); g.connect(lp); o.start(t); o.stop(t + 0.4);
+  }
+  function noise(t, dur, type, freq, vol) {
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf; const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+    const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f); f.connect(g); g.connect(lp); s.start(t, Math.random()); s.stop(t + dur + 0.02);
+  }
+  function bell(t, n) {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = "sine"; o.frequency.value = m2f(n);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.09, t + 0.01); g.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    o.connect(g); g.connect(lp); o.start(t); o.stop(t + 1.7);
+  }
+  function schedule() {
+    while (nextT < ctx.currentTime + 0.4) {
+      const bar = Math.floor(step / 16), s16 = step % 16, chord = PROGS[prog][bar % 4];
+      const swing = (s16 % 2) ? S16 * 0.18 : 0, t = nextT + swing;
+      if (s16 === 0) keys(t, chord, 0.11, SPB * 3.6);
+      if (s16 === 10 && Math.random() < 0.6) keys(t, chord.slice(1), 0.06, SPB * 1.6);
+      if (s16 === 0 || s16 === 10) bass(t, chord[0], SPB * 1.7);
+      if (s16 === 0 || s16 === 7 || (s16 === 10 && Math.random() < 0.5)) kick(t);
+      if (s16 === 4 || s16 === 12) { noise(t, 0.18, "bandpass", 1800, 0.22); }
+      if (s16 % 2 === 0) noise(t, 0.04, "highpass", 7000, s16 % 4 ? 0.035 : 0.06);
+      if (Math.random() < 0.07 && s16 % 2 === 0) bell(t, PENTA[Math.floor(Math.random() * PENTA.length)]);
+      step++; nextT += S16;
+      if (step % 128 === 0) prog = Math.floor(Math.random() * PROGS.length);
+    }
+  }
+  function start() {
+    if (CFG.music <= 0) return;
+    if (!ctx) init();
+    if (ctx.state === "suspended") ctx.resume();
+    if (started) return; started = true; nextT = ctx.currentTime + 0.1;
+    timer = setInterval(schedule, 100);
+  }
+  function setVol(v) { if (master) master.gain.value = v; }
+  return { start, setVol, get ctx() { return ctx; } };
+})();
+LOFI.start();
+setInterval(() => { if (LOFI.ctx && LOFI.ctx.state === "suspended") LOFI.ctx.resume(); }, 2000);
+document.addEventListener("click", () => LOFI.start(), { once: false });
+let musicOn = CFG.music > 0;
+
 // ---------- TikFinity ----------
 let ws, wsOk = false;
 function connect() {
@@ -498,7 +588,7 @@ function frame(now) {
   g.fillStyle = gr; g.fillRect(0, 0, 1080, 760);
   drawHUD(now); celebration(now); drawConfetti(now, dt);
   const ft = (now - flashT) / 1000; if (ft < 0.35) { g.fillStyle = `rgba(255,255,255,${0.8 * (1 - ft / 0.35)})`; g.fillRect(0, 0, 1080, 1920); }
-  document.getElementById("st").textContent = (wsOk ? "✅ mit TikFinity verbunden" : "⏳ warte auf TikFinity (" + CFG.ws + ")") + (muted ? " · 🔇 Theo stumm (M)" : " · 🔊 Theo an (M)");
+  document.getElementById("st").textContent = (wsOk ? "✅ mit TikFinity verbunden" : "⏳ warte auf TikFinity (" + CFG.ws + ")") + (muted ? " · 🔇 Theo stumm (M)" : " · 🔊 Theo an (M)") + (musicOn ? " · 🎵 Musik an (N)" : " · 🎵 Musik aus (N)") + (LOFI.ctx ? " [" + LOFI.ctx.state + "]" : "");
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -509,6 +599,7 @@ if (CFG.test) T.style.display = "block";
 document.addEventListener("keydown", e => {
   if (e.key === "t" || e.key === "T") T.style.display = T.style.display === "none" ? "block" : "none";
   if (e.key === "m" || e.key === "M") muted = !muted;
+  if (e.key === "n" || e.key === "N") { musicOn = !musicOn; LOFI.start(); LOFI.setVol(musicOn ? (CFG.music || 0.35) : 0); }
 });
 document.getElementById("ts").value = S.start;
 const NAMES = ["lena.x", "maxi_09", "sophiaa", "jonas_b", "mia.mia", "ben_10", "emily_r", "noah.k", "lara_zh", "finn99"];
