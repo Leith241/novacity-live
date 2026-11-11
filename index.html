@@ -22,8 +22,7 @@
   <div class="row">Status: <span id="st">–</span></div>
   <div class="row">Empfangen: <span id="cnt">0</span> Events<pre id="dbg" style="font-size:11px;max-height:120px;overflow:auto;background:#000;padding:4px;margin:4px 0;white-space:pre-wrap"></pre></div>
   <div class="row">Name: <input id="tn" value="testfan"> <button data-a="rnd">Zufall</button></div>
-  <div class="row"><button data-a="follow">Follow</button><button data-a="g1">Rose (1)</button><button data-a="g5">5</button>
-    <button data-a="g10">10</button><button data-a="g30">30</button><button data-a="g99">99</button><button data-a="g500">500</button><button data-a="g1500">1500</button></div>
+  <div class="row"><button data-a="follow">Follow</button><button data-a="ulike">+50 Likes (Name)</button><button data-a="ucom">Kommentar (Name)</button></div>
   <div class="row"><button data-a="like">+100 Likes</button><button data-a="like1k">+1000 Likes</button><button data-a="fill">Stadt füllen</button><button data-a="idle">Theo-Aufruf</button><button data-a="chat">Kommentar</button><button data-a="share">Teilen</button></div>
   <div class="row">Einwohner-Start: <input id="ts" type="number" style="width:70px"> <button data-a="setstart">Setzen</button></div>
   <div class="row"><button data-a="export">city.json speichern</button><button data-a="import">city.json laden</button>
@@ -59,7 +58,9 @@ const LEVELS = [ // Baupunkte (BP) = Münzen der Geschenke
 ];
 const LIKE_GOALS = [ { name: "Eisdiele", need: 1000 }, { name: "Trampolinpark", need: 3000 }, { name: "Fitnessstudio", need: 6000 },
                      { name: "Kino", need: 10000 }, { name: "Freibad", need: 20000 } ];
-const COIN_GOALS = [ { name: "Polizeistation", need: 300 }, { name: "Brunnen", need: 1000 }, { name: "Stadion", need: 5000 } ];
+const COMMENT_GOALS = [ { name: "Brunnen", need: 100 }, { name: "Stadtpark", need: 300 }, { name: "Stadion", need: 800 } ];
+// Geschenke haben KEINE Wirkung im Spiel. Häuser wachsen nur durch Likes und Kommentare.
+const BP_PER_LIKE = 0.2, BP_PER_COMMENT = 2, COMMENT_COOLDOWN = 20000;
 const PREBUILT = [ { name: "Pizzeria", shop: 0 } ];   // schon in Tag 2 gebaut
 const CREDITS = { like: 1, chat: 2, share: 3, follow: 10 };
 const CITY_NAMES = ["Nova City", "Glanzburg", "Nova Hafen", "Sonnental", "Nova Berg", "Neu-Nova"];   // Stadt voll -> nächste
@@ -81,7 +82,7 @@ for (let r = 0; r < ROWS; r++) for (const c of ORDER) { if (r === 0 && (c === 3 
 const WH = Y0 + (ROWS - 1) * ROWH + 260;
 
 // ---------- Zustand ----------
-const KEY = "novacity_live_v3";  // gleicher Speicher wie vorher
+const KEY = "novacity_live_v4";  // gleicher Speicher wie vorher
 function fresh() {
   return { start: CFG.start, newFollows: 0, houses: [], specials: [], likes: 0, likeIdx: 0, likeBase: 0,
            coins: 0, coinIdx: 0, coinBase: 0, gifts: [], kasse: 0, focus: null, city: 0, popIdx: -1 };
@@ -211,29 +212,29 @@ function onFollow(id, name) {
   if (isNew) queue.push({ type: "new", id, title: "NEUES HAUS!", sub: `@${name} · ${LEVELS[0].name}` });
   save();
 }
-function onGift(id, name, coins, giftName, count) {
-  let h = findH(id); const isNew = !h;
-  if (!h) h = newHouse(id, name); if (!h) return;
-  const before = h.level; h.bp += coins; h.level = levelOf(h.bp);
-  pushGift(name, `${count > 1 ? count + "x " : ""}${giftName || "Geschenk"} · +${coins} BP`);
-  S.coins += coins;
-  if (isNew) queue.push({ type: "new", id, title: "NEUES HAUS!", sub: `@${name} · ${LEVELS[h.level].name}` });
-  else if (h.level > before) queue.push({ type: "up", id, title: `LEVEL ${h.level + 1}!`, sub: `@${name} · ${LEVELS[h.level].name}` });
-  else queue.push({ type: "gift", id, title: `+${coins} BP`, sub: `@${name} · noch ${nextNeed(h)} BP bis Level ${h.level + 2}`, short: true });
-  checkGoals(); save();
+function addBP(id, amt) {   // nur für Einwohner (wer folgt, hat ein Haus)
+  const h = findH(id); if (!h) return;
+  const before = h.level; h.bp = Math.round((h.bp + amt) * 10) / 10; h.level = levelOf(h.bp);
+  if (h.level > before) queue.push({ type: "up", id, title: `LEVEL ${h.level + 1}!`, sub: `@${h.name} · ${LEVELS[h.level].name}` });
 }
 function nextNeed(h) { const n = LEVELS[h.level + 1]; return n ? n.bp - h.bp : 0; }
-function onLike(n) { S.likes += n; S.kasse += n * CREDITS.like; checkGoals(); save(); }
-function onChat() { S.kasse += CREDITS.chat; save(); }
+function onLike(n, id) { S.likes += n; S.kasse += n * CREDITS.like; if (id) addBP(id, n * BP_PER_LIKE); checkGoals(); save(); }
+const lastChat = {};
+function onChat(id) {
+  S.comments = (S.comments || 0) + 1; S.kasse += CREDITS.chat;
+  const now = Date.now(); if (id && (!lastChat[id] || now - lastChat[id] > COMMENT_COOLDOWN)) { lastChat[id] = now; addBP(id, BP_PER_COMMENT); }
+  checkGoals(); save();
+}
 function onShare() { S.kasse += CREDITS.share; save(); }
 function checkGoals() {
   const lg = LIKE_GOALS[S.likeIdx];
   if (lg && S.likes - S.likeBase >= lg.need) {
     S.likeBase += lg.need; S.likeIdx++; addSpecial(lg.name, 1, `${lg.need.toLocaleString("de-DE")} Likes geschafft – danke!`);
   }
-  const cg = COIN_GOALS[S.coinIdx];
-  if (cg && S.coins - S.coinBase >= cg.need) {
-    S.coinBase += cg.need; S.coinIdx++; addSpecial(cg.name, 3, `${cg.need.toLocaleString("de-DE")} Münzen geschafft – danke!`);
+  S.comments = S.comments || 0; S.cIdx = S.cIdx || 0; S.cBase = S.cBase || 0;
+  const cg = COMMENT_GOALS[S.cIdx];
+  if (cg && S.comments - S.cBase >= cg.need) {
+    S.cBase += cg.need; S.cIdx++; addSpecial(cg.name, 3, `${cg.need.toLocaleString("de-DE")} Kommentare geschafft – danke!`);
   }
 }
 function addSpecial(name, shop, sub) {
@@ -257,7 +258,7 @@ function startItem(now) {
 }
 
 // ---------- Theos Stimme ----------
-const VL = { new: [0, 1, 2], up: [3, 4, 5], gift: [6, 7], goal: [8, 9], city: [10], pop500: [11], idle: [13, 15] };   // nur Follow/Likes – nie automatisch um Geschenke bitten
+const VL = { new: [0, 1, 2], up: [3, 5], gift: [], goal: [8, 9], city: [10], pop500: [11], idle: [] };   // nur Follow/Likes – nie automatisch um Geschenke bitten
 const clips = VOICE.map(src => { const a = new Audio(src); a.preload = "auto"; return a; });
 let muted = P.get("mute") === "1" || ONLYMUSIC, speaking = false, lastVoice = 0, lastGiftVoice = 0, lastPick = -1;
 function say(kind) {
@@ -284,7 +285,7 @@ function voiceFor(item, now) {
 }
 setInterval(() => {   // Aufrufe, wenn gerade nichts passiert
   const now = performance.now();
-  if (!cur && !queue.length && now - lastVoice > CFG.idleMin * 60000 * (0.85 + Math.random() * 0.3)) say("idle");
+  // keine automatischen Aufrufe mehr
 }, 5000);
 lastVoice = performance.now() - CFG.idleMin * 60000 + 20000;   // erster Aufruf nach ca. 20 s
 
@@ -395,13 +396,9 @@ function handle(msg) {
   const id = String(u.uniqueId || u.userId || d.uniqueId || d.userId || "gast");
   const name = u.uniqueId || u.nickname || d.nickname || "gast";
   if (ev === "follow" || (ev === "social" && /follow/i.test(d.displayType || d.label || ""))) onFollow(id, name);
-  else if (ev === "gift") {
-    if (d.giftType === 1 && !d.repeatEnd) return;
-    const cnt = d.repeatCount || 1;
-    onGift(id, name, (d.diamondCount || 1) * cnt, d.giftName, cnt);
-  }
-  else if (ev === "like") onLike(d.likeCount || 1);
-  else if (ev === "chat") onChat();
+  else if (ev === "gift") { return; }   // Geschenke: keine Wirkung im Spiel
+  else if (ev === "like") onLike(d.likeCount || 1, id);
+  else if (ev === "chat") onChat(id);
   else if (ev === "share" || (ev === "social" && /share/i.test(d.displayType || d.label || ""))) onShare();
 }
 connect();
@@ -508,7 +505,7 @@ function drawHUD(now) {
   chip(700, 238, 330, 30, `🏠 ${built} / ${PLOTS.length} bebaut`);
   chip(700, 272, 330, 30, `👥 ${einwohner().toLocaleString("de-DE")} / ${G ? G.n.toLocaleString("de-DE") : "✓"}`);
   // Ziele
-  goalCard(30, 326, 500, "COIN-ZIEL", "#ffb428", COIN_GOALS[S.coinIdx], S.coins - S.coinBase, "★");
+  goalCard(30, 326, 500, "KOMMENTAR-ZIEL", "#ffb428", COMMENT_GOALS[S.cIdx || 0], (S.comments || 0) - (S.cBase || 0), "✎");
   goalCard(550, 326, 500, "LIKE-ZIEL", PINK, LIKE_GOALS[S.likeIdx], S.likes - S.likeBase, "♥");
   // Top 3 / Letzte Geschenke
   rr(30, 460, 400, 186, 22, "rgba(24,26,44,.82)", 4);
@@ -519,10 +516,10 @@ function drawHUD(now) {
     txt("Lv " + (h.level + 1), 404, 526 + i * 44, 24, YEL, "right", 0);
   });
   rr(650, 460, 400, 186, 22, "rgba(24,26,44,.82)", 4);
-  txt("🎁 Letzte Geschenke", 670, 486, 24, "#fff", "left", 0);
-  S.gifts.forEach((gi, i) => {
-    txt(gi.name.slice(0, 18), 670, 518 + i * 44, 22, "#fff", "left", 0);
-    txt(gi.txt.slice(0, 30), 670, 540 + i * 44, 18, "#c8c8dc", "left", 0);
+  txt("🏠 Neue Einwohner", 670, 486, 24, "#fff", "left", 0);
+  S.houses.slice(-3).reverse().forEach((h2, i) => {
+    rr(666, 506 + i * 44, 368, 38, 10, "rgba(255,255,255,.08)", 0);
+    txt("@" + h2.name.slice(0, 20), 676, 526 + i * 44, 22, "#fff", "left", 0);
   });
   // Spielerkarte
   const h = S.houses.find(x => x.id === S.focus);
@@ -537,12 +534,12 @@ function drawHUD(now) {
     const nxt = LEVELS[h.level + 1];
     const pr = nxt ? (h.bp - LEVELS[h.level].bp) / (nxt.bp - LEVELS[h.level].bp) : 1;
     rr(214, 1610, 760, 18, 9, "#3c3f5a", 0); if (pr > 0.02) rr(214, 1610, 760 * Math.min(1, pr), 18, 9, TEAL, 0);
-    txt(`${h.bp} BP`, 214, 1640, 18, "#c8c8dc", "left", 0);
-    txt(nxt ? `noch ${nxt.bp - h.bp} BP bis Level ${h.level + 2}` : "Max-Level!", 974, 1640, 18, "#c8c8dc", "right", 0);
+    txt(`${Math.floor(h.bp)} Baupunkte`, 214, 1640, 18, "#c8c8dc", "left", 0);
+    txt(nxt ? `noch ${Math.ceil(nxt.bp - h.bp)} bis Level ${h.level + 2}` : "Max-Level!", 974, 1640, 18, "#c8c8dc", "right", 0);
   }
   // Info-Leiste
   rr(60, 1664, 960, 50, 18, "rgba(24,26,44,.85)", 4);
-  txt("1 Follow = 1 Haus in Nova City 🏠 · Likes bauen das nächste Gebäude", 540, 1690, fit("1 Follow = 1 Haus in Nova City 🏠 · Likes bauen das nächste Gebäude", 24, 920), "#fff", "center", 0);
+  txt("1 Follow = 1 Haus 🏠 · Likes & Kommentare lassen dein Haus wachsen", 540, 1690, fit("1 Follow = 1 Haus 🏠 · Likes & Kommentare lassen dein Haus wachsen", 24, 920), "#fff", "center", 0);
 }
 function chip(x, y, w, h, t) { rr(x, y, w, h, 10, "rgba(255,255,255,.1)", 0); txt(t, x + 14, y + h / 2 + 1, 20, "#fff", "left", 0); }
 function starShape(r, col) {
@@ -609,7 +606,8 @@ T.addEventListener("click", e => {
   if (a === "rnd") { inp.value = NAMES[Math.floor(Math.random() * NAMES.length)] + Math.floor(Math.random() * 90); return; }
   const n = (inp.value || "testfan").replace(/^@/, "");
   if (a === "follow") onFollow(n, n);
-  if (/^g\d+$/.test(a)) { const c = parseInt(a.slice(1), 10); onGift(n, n, c, c === 1 ? "Rose" : "Test-Geschenk", 1); }
+  if (a === "ulike") onLike(50, n);
+  if (a === "ucom") { lastChat[n] = 0; onChat(n); }
   if (a === "like") onLike(100);
   if (a === "like1k") onLike(1000);
   if (a === "chat") onChat();
