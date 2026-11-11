@@ -314,6 +314,7 @@ const LOFI = (() => {
       [[ "sine", 1, 0.55 ], [ "triangle", 2.001, 0.08 ]].forEach(([type, mul, amp]) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = type; o.frequency.value = f * mul; o.detune.value = (Math.random() - 0.5) * 8;
+        g.gain.value = 0; g.gain.setValueAtTime(0, t);
         g.gain.setValueAtTime(0, t + k * 0.012);
         g.gain.linearRampToValueAtTime(vel * amp, t + k * 0.012 + 0.015);
         g.gain.exponentialRampToValueAtTime(0.0004, t + dur);
