@@ -44,7 +44,7 @@ const CFG = {
   goal: parseInt(P.get("goal") || "500", 10),     // Story-Ziel (Glanzburg)
   test: P.get("test") === "1",
   vol: parseFloat(P.get("vol") || "1"),        // Lautstärke Theo 0–1
-  idleMin: parseFloat(P.get("idle") || "3.5"),  // Minuten zwischen Aufrufen ohne Events
+  idleMin: Math.max(5, parseFloat(P.get("idle") || "8")),   // mind. 5 Min  // Minuten zwischen Aufrufen ohne Events
   music: parseFloat(P.get("music") ?? "0.35"),   // Lofi-Lautstärke 0–1 (0 = aus)
 };
 const LEVELS = [ // Baupunkte (BP) = Münzen der Geschenke
@@ -257,7 +257,7 @@ function startItem(now) {
 }
 
 // ---------- Theos Stimme ----------
-const VL = { new: [0, 1, 2], up: [3, 4, 5], gift: [6, 7], goal: [8, 9], city: [10], pop500: [11], idle: [12, 13, 14, 15] };
+const VL = { new: [0, 1, 2], up: [3, 4, 5], gift: [6, 7], goal: [8, 9], city: [10], pop500: [11], idle: [13, 15] };   // nur Follow/Likes – nie automatisch um Geschenke bitten
 const clips = VOICE.map(src => { const a = new Audio(src); a.preload = "auto"; return a; });
 let muted = P.get("mute") === "1" || ONLYMUSIC, speaking = false, lastVoice = 0, lastGiftVoice = 0, lastPick = -1;
 function say(kind) {
@@ -350,8 +350,8 @@ const LOFI = (() => {
       if (s16 === 10 && Math.random() < 0.6) keys(t, chord.slice(1), 0.06, SPB * 1.6);
       if (s16 === 0 || s16 === 10) bass(t, chord[0], SPB * 1.7);
       if (s16 === 0 || s16 === 7 || (s16 === 10 && Math.random() < 0.5)) kick(t);
-      if (s16 === 4 || s16 === 12) { noise(t, 0.18, "bandpass", 1800, 0.22); }
-      if (s16 % 2 === 0) noise(t, 0.04, "highpass", 7000, s16 % 4 ? 0.022 : 0.04);
+      if (s16 === 4 || s16 === 12) { noise(t, 0.3, "lowpass", 900, 0.12); }   // weiche Snare
+      // keine Hi-Hats mehr (klangen wie Klicken)
       if (Math.random() < 0.07 && s16 % 2 === 0) bell(t, PENTA[Math.floor(Math.random() * PENTA.length)]);
       step++; nextT += S16;
       if (step % 128 === 0) prog = Math.floor(Math.random() * PROGS.length);
@@ -541,7 +541,7 @@ function drawHUD(now) {
   }
   // Info-Leiste
   rr(60, 1664, 960, 50, 18, "rgba(24,26,44,.85)", 4);
-  txt("1 Follow oder 1 Rose = eigenes Haus · größere Geschenke = größeres Haus", 540, 1690, fit("1 Follow oder 1 Rose = eigenes Haus · größere Geschenke = größeres Haus", 24, 920), "#fff", "center", 0);
+  txt("1 Follow = 1 Haus in Nova City 🏠 · Likes bauen das nächste Gebäude", 540, 1690, fit("1 Follow = 1 Haus in Nova City 🏠 · Likes bauen das nächste Gebäude", 24, 920), "#fff", "center", 0);
 }
 function chip(x, y, w, h, t) { rr(x, y, w, h, 10, "rgba(255,255,255,.1)", 0); txt(t, x + 14, y + h / 2 + 1, 20, "#fff", "left", 0); }
 function starShape(r, col) {
