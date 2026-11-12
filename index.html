@@ -83,7 +83,7 @@ for (let r = 0; r < ROWS; r++) for (const c of ORDER) { if (r === 0 && (c === 3 
 const WH = Y0 + (ROWS - 1) * ROWH + 260;
 
 // ---------- Zustand ----------
-const KEY = "novacity_live_v4";  // gleicher Speicher wie vorher
+const KEY = "novacity_live_v4" + (new URLSearchParams(location.search).get("stadt") || "");  // &stadt=2 -> komplett neue, leere Stadt
 function fresh() {
   return { start: CFG.start, newFollows: 0, houses: [], specials: [], likes: 0, likeIdx: 0, likeBase: 0,
            coins: 0, coinIdx: 0, coinBase: 0, gifts: [], kasse: 0, focus: null, city: 0, popIdx: -1 };
