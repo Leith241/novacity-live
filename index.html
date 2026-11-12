@@ -63,7 +63,7 @@ const COMMENT_GOALS = [ { name: "Brunnen", need: 100 }, { name: "Stadtpark", nee
 const BP_PER_LIKE = 0.2, BP_PER_COMMENT = 2, COMMENT_COOLDOWN = 20000;
 const PREBUILT = [ { name: "Pizzeria", shop: 0 } ];   // schon in Tag 2 gebaut
 const CREDITS = { like: 1, chat: 2, share: 3, follow: 10 };
-const CITY_NAMES = ["Nova City", "Glanzburg", "Nova Hafen", "Sonnental", "Nova Berg", "Neu-Nova"];   // Stadt voll -> nächste
+const CITY_NAMES = ["Nova City"];   // danach automatisch: Nova City 2, Nova City 3, …   // Stadt voll -> nächste
 const POP_GOALS = [   // Einwohner-Ziele (Follows) – geht nach 500 weiter
   { n: 400,   next: "Bei 400 kommt Bernds Bagger!",        done: "Bernds Bagger ist da! 🚜" },
   { n: 500,   next: "Bei 500 gehört Glanzburg uns!",       done: "Glanzburg gehört uns! 🏰" },
@@ -728,8 +728,8 @@ function drawHUD(now) {
   txt("Nova City LIVE", 150, 236, 46, "#fff", "left", 5);
   const G = POP_GOALS[popGoalIdx()];
   txt(G ? G.next : "Danke für alles! ❤️", 152, 280, fit(G ? G.next : "Danke!", 24, 530), YEL, "left", 3);
-  const built = usedPlots(cam.city).size;
-  chip(700, 204, 330, 30, `🏙️ ${cityName(cam.city)}`);
+  const built = usedPlots(S.city).size;   // zählt immer die Stadt, die gerade gebaut wird
+  chip(700, 204, 330, 30, `🏙️ ${cityName(S.city)} · wird gebaut`);
   chip(700, 238, 330, 30, `🏠 ${built} / ${PLOTS.length} bebaut`);
   chip(700, 272, 330, 30, `👥 ${einwohner().toLocaleString("de-DE")} / ${G ? G.n.toLocaleString("de-DE") : "✓"}`);
   // Ziele
