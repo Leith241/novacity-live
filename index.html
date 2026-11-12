@@ -90,8 +90,26 @@ function fresh() {
            coins: 0, coinIdx: 0, coinBase: 0, gifts: [], kasse: 0, focus: null, city: 0, popIdx: -1 };
 }
 let S; try { S = JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { S = fresh(); }
+// ---- Speicher auf dem PC: Nova-City-Speicher.bat muss laufen (speichert city.json in Dokumente\NovaCity)
+const SAVE_URL = P.get("save") || "http://127.0.0.1:8765/city";
+let diskOk = false, diskDirty = true, diskLoaded = false;
+async function diskLoad() {
+  try {
+    const r = await fetch(SAVE_URL, { cache: "no-store" }); if (!r.ok) throw 0;
+    const t = await r.text(); diskOk = true;
+    if (t && t.length > 10) { const D = JSON.parse(t);
+      if (D && D.houses && D.houses.length >= (S.houses || []).length) { S = Object.assign(fresh(), D); if (P.get("start") && S.startParam !== CFG.start) { S.start = CFG.start; S.newFollows = 0; S.startParam = CFG.start; } try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} } }
+  } catch (e) { diskOk = false; }
+  diskLoaded = true;
+}
+async function diskSave() {
+  if (!diskLoaded || !diskDirty) return; diskDirty = false;
+  try { const r = await fetch(SAVE_URL, { method: "POST", body: JSON.stringify(S), headers: { "Content-Type": "text/plain" } }); diskOk = r.ok; if (!r.ok) diskDirty = true; }
+  catch (e) { diskOk = false; diskDirty = true; }
+}
+diskLoad(); setInterval(diskSave, 8000);
 if (P.get("start") && S.startParam !== CFG.start) { S.start = CFG.start; S.newFollows = 0; S.startParam = CFG.start; }   // neue Startzahl = echte Followerzahl, nicht doppelt zählen
-function save() { S.updated = new Date().toISOString(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+function save() { S.updated = new Date().toISOString(); diskDirty = true; try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 if (S.city === undefined) S.city = 0;
 S.houses.forEach(h => { if (h.city === undefined) h.city = 0; }); S.specials.forEach(x => { if (x.city === undefined) x.city = 0; });
 const cityName = k => CITY_NAMES[k] || ("Nova City " + (k + 1));
@@ -219,8 +237,10 @@ function onFollow(id, name) {
   if (isNew) queue.push({ type: "new", id, title: "NEUES HAUS!", sub: `@${name} · ${LEVELS[0].name}` });
   save();
 }
+const MODLIST = new Set(((P.get("mods") || "") + ",canzye_,lucyloree.nn,jxst_melissa.1009,privat_3l3,lauu.rx,http_maly,melli_1430,blu3bwrry.1,musixinmyheart").toLowerCase().split(",").filter(Boolean));   // Mod-Team (Stand 12.11.)
 function addBP(id, amt) {   // nur für Einwohner (wer folgt, hat ein Haus)
   const h = findH(id); if (!h) return;
+  if (h.mod || MODLIST.has(String(id).toLowerCase())) amt *= 2;   // Moderator*innen leveln doppelt so schnell
   const before = h.level; h.bp = Math.round((h.bp + amt) * 10) / 10; h.level = levelOf(h.bp);
   if (h.level > before) h.cheer = performance.now() + 800;
   if (h.level > before) queue.push({ type: "up", id, title: `LEVEL ${h.level + 1}!`, sub: `@${h.name} · ${lvName(h.level)}` });
@@ -334,7 +354,7 @@ function voiceFor(item, now) {
 setInterval(() => {   // Aufrufe, wenn gerade nichts passiert
   const now = performance.now();
   // Hinweise (!haus, !help, !nachbar …) ca. alle 4,5 Min, nur wenn gerade Ruhe ist
-  if (!SAFE && !cur && queue.length === 0 && now - lastVoice > 270000 && clips.length > 25) say("idle");
+  // keine automatischen Hinweise mehr – Theo spricht nur bei Willkommen, Level-Up und Zielen
 }, 5000);
 lastVoice = performance.now() - CFG.idleMin * 60000 + 20000;   // erster Aufruf nach ca. 20 s
 
@@ -444,6 +464,7 @@ function handle(msg) {
   const ev = msg.event || msg.type, d = msg.data || msg, u = d.user || d;
   const id = String(u.uniqueId || u.userId || d.uniqueId || d.userId || "gast");
   const name = u.uniqueId || u.nickname || d.nickname || "gast";
+  if (u.isModerator || d.isModerator || (u.userAttributes && u.userAttributes.isModerator)) { const hm = findH(id); if (hm && !hm.mod) { hm.mod = true; save(); } }
   if (ev === "follow" || (ev === "social" && /follow/i.test(d.displayType || d.label || ""))) onFollow(id, name);
   else if (ev === "roomUser" || ev === "viewerCount") { onViewers(d.viewerCount ?? d.count); return; }
   else if (ev === "gift") { return; }   // Geschenke: keine Wirkung im Spiel
@@ -854,7 +875,8 @@ function frame(now) {
   g.fillStyle = gr; g.fillRect(0, 0, 1080, 760);
   drawHUD(now); celebration(now); drawConfetti(now, dt);
   const ft = (now - flashT) / 1000; if (ft < 0.35) { g.fillStyle = `rgba(255,255,255,${0.8 * (1 - ft / 0.35)})`; g.fillRect(0, 0, 1080, 1920); }
-  document.getElementById("st").textContent = (wsOk ? "✅ mit TikFinity verbunden" : "⏳ warte auf TikFinity (" + CFG.ws + ")") + (muted ? " · 🔇 Theo stumm (M)" : " · 🔊 Theo an (M)") + (musicOn ? " · 🎵 Musik an (N)" : " · 🎵 Musik aus (N)") + (LOFI.ctx ? " [" + LOFI.ctx.state + "]" : "");
+  if (diskLoaded && !diskOk) { g.fillStyle = "rgba(200,40,60,.9)"; g.beginPath(); g.roundRect(20, 20, 300, 40, 12); g.fill(); txt("⚠ Speicher aus (Nova-City-Speicher starten)", 32, 41, fit("⚠ Speicher aus (Nova-City-Speicher starten)", 18, 280), "#fff", "left", 0); }
+  document.getElementById("st").textContent = (diskOk ? "💾 Speicher OK · " : "⚠️ Speicher aus · ") + (wsOk ? "✅ mit TikFinity verbunden" : "⏳ warte auf TikFinity (" + CFG.ws + ")") + (muted ? " · 🔇 Theo stumm (M)" : " · 🔊 Theo an (M)") + (musicOn ? " · 🎵 Musik an (N)" : " · 🎵 Musik aus (N)") + (LOFI.ctx ? " [" + LOFI.ctx.state + "]" : "");
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
