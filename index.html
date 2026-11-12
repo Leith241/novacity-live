@@ -240,7 +240,7 @@ function onCommand(id, name, text, role) {
   let h = findH(id);
   if (cmd === "haus") {   // für alle, die schon vorher gefolgt sind
     if (h) { h.pulse = performance.now(); return; }
-    if (role === 0) return;   // TikTok meldet: folgt (noch) nicht -> erst folgen
+    if (role === 0 && !SAFE) return;   // im sicheren Modus bekommt jeder ein Haus
     h = newHouse(id, name); if (!h) return; h.viaCmd = true;
     queue.push({ type: "new", id, title: "NEUES HAUS!", sub: `@${name} · ${LEVELS[0].name}` }); save(); return;
   }
@@ -272,7 +272,7 @@ function onShare() { S.kasse += CREDITS.share; save(); }
 function goalAt(list, i) { const r = Math.floor(i / list.length), g0 = list[i % list.length];
   return { name: g0.name + (r ? " " + (r + 1) : ""), need: g0.need * Math.pow(2, r) }; }
 function checkGoals() {
-  const lg = goalAt(LIKE_GOALS, S.likeIdx);
+  const lg = SAFE ? { need: Infinity } : goalAt(LIKE_GOALS, S.likeIdx);
   if (lg && S.likes - S.likeBase >= lg.need) {
     S.likeBase += lg.need; S.likeIdx++; addSpecial(lg.name, 1, `${lg.need.toLocaleString("de-DE")} Likes geschafft – danke!`);
   }
@@ -334,7 +334,7 @@ function voiceFor(item, now) {
 setInterval(() => {   // Aufrufe, wenn gerade nichts passiert
   const now = performance.now();
   // Hinweise (!haus, !help, !nachbar …) ca. alle 4,5 Min, nur wenn gerade Ruhe ist
-  if (!cur && queue.length === 0 && now - lastVoice > 270000 && clips.length > 25) say("idle");
+  if (!SAFE && !cur && queue.length === 0 && now - lastVoice > 270000 && clips.length > 25) say("idle");
 }, 5000);
 lastVoice = performance.now() - CFG.idleMin * 60000 + 20000;   // erster Aufruf nach ca. 20 s
 
@@ -618,7 +618,7 @@ function buildTicker() {
   const parts = [];
   for (let c = 0; c <= S.city; c++) { const m = mayor(c); if (m) parts.push(`👑 Bürgermeister von ${cityName(c)}: @${m.name}`); }
   const used = usedPlots(S.city).size; parts.push(`🏙️ ${cityName(S.city)} ist zu ${Math.round(used / PLOTS.length * 100)} % bebaut`);
-  const pg = POP_GOALS.find(G => G.n > einwohner()); if (pg) parts.push(`🎯 ${pg.next} Noch ${pg.n - einwohner()}!`);
+  const pg = POP_GOALS.find(G => G.n > einwohner()); if (pg && !SAFE) parts.push(`🎯 ${pg.next} Noch ${pg.n - einwohner()}!`);
   const nh = S.houses[S.houses.length - 1]; if (nh) parts.push(`🏠 Neueste Einwohner: @${nh.name}`);
   const top = [...S.houses].sort((a, b) => b.bp - a.bp)[0]; if (top) parts.push(`⭐ Größtes Haus: @${top.name} (Level ${top.level + 1})`);
   if (S.viewRec) parts.push(`👀 Zuschauer-Rekord: ${S.viewRec}`);
@@ -641,7 +641,7 @@ function drawHelp(now) {
   g.save(); g.globalAlpha = Math.max(0, a);
   rr(90, 760, 900, 644, 30, "rgba(24,26,44,.94)", 6);
   txt("BEFEHLE", 540, 820, 54, YEL);
-  const L = [["!haus", "Haus holen (wenn du schon folgst)"], ["Neuer Follow", "Haus kommt automatisch"], ["!grün !blau !pink", "Hausfarbe (auch !lila !gelb !orange)"],
+  const L = [["!haus", SAFE ? "Dein eigenes Haus holen" : "Haus holen (wenn du schon folgst)"], ["Neuer Follow", "Haus kommt automatisch"], ["!grün !blau !pink", "Hausfarbe (auch !lila !gelb !orange)"],
              ["!name Text", "Gib deinem Haus einen Namen"], ["!nachbar @name", "Zieh neben deinen Freund"], ["!schleife !krone", "Deko an / aus"], ["!blumen !baum !hund", "Deko an / aus"], ["!a !b !c", "bei der Abstimmung mitmachen"]];
   L.forEach(([c, d], i) => { txt(c, 125, 900 + i * 62, fit(c, 34, 330), TEAL, "left", 5); txt(d, 480, 900 + i * 62, fit(d, 28, 480), "#fff", "left", 0); });
   g.restore();
@@ -731,7 +731,24 @@ function goalCard(x, y, w, label, col, goal, have, icon) {
   if (pr > 0.03) rr(x + 16, y + 86, (w - 32) * pr, 22, 11, col, 0);
   txt(goal ? `${Math.floor(have).toLocaleString("de-DE")} / ${need.toLocaleString("de-DE")}` : "✓", x + w / 2, y + 97, 20, "#fff", "center", 3);
 }
+const CAMMODE = P.get("cam") === "1", SAFE = P.get("safe") === "1";   // &cam=1 Platz für Kamera oben · &safe=1 keine Dauer-Aufforderungen
+function drawCamHUD(now) {
+  // Rahmen für die Kamera (Kamera-Quelle in LIVE Studio genau hier drüberlegen)
+  g.save(); g.fillStyle = "rgba(10,10,24,.82)"; g.beginPath(); g.roundRect(24, 120, 1032, 640, 34); g.fill();
+  g.setLineDash([36, 18]); g.lineDashOffset = -now / 40; g.lineWidth = 16; g.strokeStyle = YEL; g.stroke(); g.setLineDash([]); g.restore();
+  txt("📷", 540, 360, 120, "#fff", "center", 0);
+  txt("HIER KOMMT DEINE WEBCAM HIN", 540, 500, 54, YEL, "center", 6);
+  txt("Webcam-Quelle in LIVE Studio genau auf diesen Rahmen ziehen", 540, 570, 28, "#fff", "center", 0);
+  rr(48, 712, 300, 56, 18, "rgba(24,26,44,.92)", 4); txt("⭐ Nova City LIVE", 198, 741, 28, "#fff", "center", 0);
+  // kompakte Leiste unter der Kamera
+  rr(30, 790, 1020, 74, 22, "rgba(24,26,44,.9)", 4);
+  const built = usedPlots(S.city).size;
+  txt(`🏙️ ${cityName(S.city)} · 🏠 ${built}/${PLOTS.length} · 👥 ${einwohner().toLocaleString("de-DE")}`, 52, 828, 26, "#fff", "left", 0);
+  const cg = goalAt(COMMENT_GOALS, S.cIdx || 0), cv = (S.comments || 0) - (S.cBase || 0);
+  const CT = `✎ ${cg.name} ${Math.min(cv, cg.need)}/${cg.need}`; txt(CT, 1028, 828, fit(CT, 24, 360), YEL, "right", 0);
+}
 function drawHUD(now) {
+  if (CAMMODE) { drawCamHUD(now); drawCard(); drawInfo(now); g.save(); g.translate(0, 230); drawVote(); g.restore(); drawTicker(now); g.save(); g.translate(0, 300); drawHelp(Date.now()); g.restore(); return; }
   // Kopf
   rr(30, 190, 1020, 120, 28, "rgba(24,26,44,.88)", 5);
   rr(50, 208, 84, 84, 20, TEAL, 4);
@@ -760,7 +777,12 @@ function drawHUD(now) {
     rr(666, 506 + i * 44, 368, 38, 10, "rgba(255,255,255,.08)", 0);
     txt("@" + h2.name.slice(0, 20), 676, 526 + i * 44, 22, "#fff", "left", 0);
   });
-  // Spielerkarte
+  drawCard(); drawInfo(now);
+  drawVote();
+  drawTicker(now);
+  drawHelp(Date.now());
+}
+function drawCard() {
   const h = S.houses.find(x => x.id === S.focus);
   if (h) {
     rr(60, 1500, 960, 150, 30, "rgba(24,26,44,.9)", 5);
@@ -776,15 +798,13 @@ function drawHUD(now) {
     txt(`${Math.floor(h.bp)} Baupunkte`, 214, 1640, 18, "#c8c8dc", "left", 0);
     txt(nxt ? `noch ${Math.ceil(nxt.bp - h.bp)} bis Level ${h.level + 2}` : "Max-Level!", 974, 1640, 18, "#c8c8dc", "right", 0);
   }
-  // Info-Leiste
+}
+function drawInfo(now) {
   rr(60, 1658, 960, 70, 18, "rgba(24,26,44,.85)", 4);
-  { const L1 = "1 Follow = 1 Haus 🏠 · Schon Follower? Schreib !haus", L2 = "Alle Befehle: !help · Likes & Kommentare = Level-Up";
+  { const L1 = SAFE ? "Schreib !haus für dein eigenes Haus 🏠" : "1 Follow = 1 Haus 🏠 · Schon Follower? Schreib !haus", L2 = SAFE ? "Alle Befehle: !help" : "Alle Befehle: !help · Likes & Kommentare = Level-Up";
   txt(L1, 540, 1678, fit(L1, 24, 920), "#fff", "center", 0); txt(L2, 540, 1708, fit(L2, 20, 920), YEL, "center", 0); }
-  if (!cur) { const pulse = 1 + 0.04 * Math.sin(now / 250); g.save(); g.translate(540, 830); g.scale(pulse, pulse);
+  if (!cur && !SAFE && !CAMMODE) { const pulse = 1 + 0.04 * Math.sin(now / 250); g.save(); g.translate(540, 830); g.scale(pulse, pulse);
     rr(-330, -34, 660, 68, 34, YEL, 5); txt("Schon Follower? Schreib !haus 🏠", 0, 2, fit("Schon Follower? Schreib !haus 🏠", 34, 610), DARK, "center", 0); g.restore(); }
-  drawVote();
-  drawTicker(now);
-  drawHelp(Date.now());
 }
 function chip(x, y, w, h, t) { rr(x, y, w, h, 10, "rgba(255,255,255,.1)", 0); txt(t, x + 14, y + h / 2 + 1, 20, "#fff", "left", 0); }
 function starShape(r, col) {
@@ -796,7 +816,7 @@ function celebration(now) {
   const t = (now - cur.t0) / 1000 - 0.75; if (t < 0) return;
   const out = cur.dur - 0.75 - t; const k = Math.min(1, t / 0.2, Math.max(0, out / 0.25));
   g.save(); g.globalAlpha = k; const s = 0.7 + 0.3 * Math.min(1, t / 0.2);
-  g.translate(540, 760); g.scale(s, s);
+  g.translate(540, CAMMODE ? 1120 : 760); g.scale(s, s);
   const big = cur.short ? 76 : 104;
   txt(cur.title, 0, 0, fit(cur.title, big, 980), (cur.type === "goal" || cur.type === "pop" || cur.type === "city" || cur.type === "tour") ? YEL : "#fff", "center", 12);
   txt(cur.sub, 0, big * 0.85, fit(cur.sub, 40, 980), cur.type === "gift" ? YEL : "#fff", "center", 6);
