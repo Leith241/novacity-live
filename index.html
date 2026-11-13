@@ -92,18 +92,20 @@ function fresh() {
 let S; try { S = JSON.parse(localStorage.getItem(KEY)) || fresh(); } catch (e) { S = fresh(); }
 // ---- Speicher auf dem PC: Nova-City-Speicher.bat muss laufen (speichert city.json in Dokumente\NovaCity)
 const SAVE_URL = P.get("save") || "http://127.0.0.1:8765/city";
-let diskOk = false, diskDirty = true, diskLoaded = false;
+let diskOk = false, diskDirty = true, diskLoaded = false, diskHouses = 0;
 async function diskLoad() {
   try {
     const r = await fetch(SAVE_URL, { cache: "no-store" }); if (!r.ok) throw 0;
     const t = await r.text(); diskOk = true;
-    if (t && t.length > 10) { const D = JSON.parse(t);
+    if (t && t.length > 10) { const D = JSON.parse(t); diskHouses = (D.houses || []).length;
       if (D && D.houses && D.houses.length >= (S.houses || []).length) { S = Object.assign(fresh(), D); if (P.get("start") && S.startParam !== CFG.start) { S.start = CFG.start; S.newFollows = 0; S.startParam = CFG.start; } try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} } }
-  } catch (e) { diskOk = false; }
-  diskLoaded = true;
+    diskLoaded = true;   // erst NACH erfolgreichem Laden wird gespeichert
+  } catch (e) { diskOk = false; setTimeout(diskLoad, 4000); }   // Speicher noch nicht gestartet -> später nochmal laden, NICHTS überschreiben
 }
 async function diskSave() {
-  if (!diskLoaded || !diskDirty) return; diskDirty = false;
+  if (!diskLoaded || !diskDirty) return;
+  if ((S.houses || []).length < diskHouses) return;   // Schutz: nie einen größeren Stand mit einem kleineren überschreiben
+  diskDirty = false; diskHouses = S.houses.length;
   try { const r = await fetch(SAVE_URL, { method: "POST", body: JSON.stringify(S), headers: { "Content-Type": "text/plain" } }); diskOk = r.ok; if (!r.ok) diskDirty = true; }
   catch (e) { diskOk = false; diskDirty = true; }
 }
